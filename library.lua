@@ -9,18 +9,19 @@ local Luxware = {}
 Luxware.__index = Luxware
 
 local Theme = {
-    Background = Color3.fromRGB(0, 0, 0),
-    Panel = Color3.fromRGB(8, 8, 8),
-    Surface = Color3.fromRGB(16, 16, 16),
-    SurfaceLight = Color3.fromRGB(28, 28, 28),
-    Border = Color3.fromRGB(48, 48, 48),
+    Background = Color3.fromRGB(15, 15, 15),
+    Panel = Color3.fromRGB(19, 19, 19),
+    Surface = Color3.fromRGB(24, 24, 24),
+    SurfaceLight = Color3.fromRGB(34, 34, 34),
+    Border = Color3.fromRGB(50, 50, 50),
     Text = Color3.fromRGB(255, 255, 255),
-    MutedText = Color3.fromRGB(185, 185, 185),
-    SoftText = Color3.fromRGB(210, 210, 210),
-    DimText = Color3.fromRGB(140, 140, 140),
+    MutedText = Color3.fromRGB(190, 190, 190),
+    SoftText = Color3.fromRGB(220, 220, 220),
+    DimText = Color3.fromRGB(145, 145, 145),
+    Feedback = Color3.fromRGB(235, 235, 235),
     Success = Color3.fromRGB(225, 225, 225),
     Error = Color3.fromRGB(170, 170, 170),
-    ToggleOn = Color3.fromRGB(245, 245, 245),
+    ToggleOn = Color3.fromRGB(235, 235, 235),
     ToggleOff = Color3.fromRGB(55, 55, 55),
 }
 
@@ -30,6 +31,7 @@ local TWEEN_DEFAULT = TweenInfo.new(0.2)
 local TWEEN_FADE = TweenInfo.new(0.3)
 local TWEEN_DRAG = TweenInfo.new(0.12, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
 local TWEEN_PRESS = TweenInfo.new(0.08, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+local POINTER_DRAG_THRESHOLD = 8
 
 -- [ Protection & Parent Setup ]
 local parentTarget = nil
@@ -43,12 +45,33 @@ local function CreateUIElement(className, properties)
     return el
 end
 
-local function IsPointerInput(input)
+local function IsPointerDown(input)
     return input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch
 end
 
-local function IsPointerMovement(input)
+local function IsPointerMove(input)
     return input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch
+end
+
+local function IsPointerUp(input, pointerInput, pointerType)
+    if not pointerType then return false end
+    if pointerType == Enum.UserInputType.Touch then
+        return input == pointerInput
+    end
+    return input.UserInputType == pointerType
+end
+
+local function PointerMoveMatches(input, pointerInput, pointerType)
+    if not pointerType or not IsPointerMove(input) then return false end
+    if pointerType == Enum.UserInputType.Touch then
+        return input == pointerInput
+    end
+    return input.UserInputType == Enum.UserInputType.MouseMovement
+end
+
+local function PointerDeltaMagnitude(startPosition, currentPosition)
+    local delta = currentPosition - startPosition
+    return math.sqrt(delta.X * delta.X + delta.Y * delta.Y), delta
 end
 
 local function TrackConnection(registerConnection, signal, callback)
@@ -126,6 +149,7 @@ local function CreateControlLabel(parent, text, rightPadding)
 end
 
 local function MakeDraggable(dragObject, object, registerConnection)
+    local pointerDown = false
     local dragging = false
     local dragInput = nil
     local dragStart = nil
@@ -135,18 +159,15 @@ local function MakeDraggable(dragObject, object, registerConnection)
     if dragObject then dragObject.Active = true end
     if object then object.Active = true end
 
-    local function inputMatchesDrag(input)
-        if not dragging then return false end
-        if dragInputType == Enum.UserInputType.Touch then
-            return input == dragInput
-        end
-        return input.UserInputType == Enum.UserInputType.MouseMovement
-    end
-
     local function update(input)
-        if not inputMatchesDrag(input) then return end
+        if not pointerDown or not PointerMoveMatches(input, dragInput, dragInputType) then return end
 
-        local delta = input.Position - dragStart
+        local distance, delta = PointerDeltaMagnitude(dragStart, input.Position)
+        if not dragging then
+            if distance < POINTER_DRAG_THRESHOLD then return end
+            dragging = true
+        end
+
         object.Position = UDim2.new(
             startPosition.X.Scale,
             startPosition.X.Offset + delta.X,
@@ -156,9 +177,10 @@ local function MakeDraggable(dragObject, object, registerConnection)
     end
 
     TrackConnection(registerConnection, dragObject.InputBegan, function(input)
-        if not IsPointerInput(input) then return end
+        if not IsPointerDown(input) then return end
 
-        dragging = true
+        pointerDown = true
+        dragging = false
         dragInput = input
         dragInputType = input.UserInputType
         dragStart = input.Position
@@ -168,7 +190,8 @@ local function MakeDraggable(dragObject, object, registerConnection)
     TrackConnection(registerConnection, UserInputService.InputChanged, update)
 
     TrackConnection(registerConnection, UserInputService.InputEnded, function(input)
-        if input == dragInput or input.UserInputType == dragInputType then
+        if IsPointerUp(input, dragInput, dragInputType) then
+            pointerDown = false
             dragging = false
             dragInput = nil
             dragInputType = nil
@@ -195,13 +218,13 @@ local function AddButtonFeedback(button, registerConnection, baseColor, hoverCol
     end)
 
     TrackConnection(registerConnection, button.InputBegan, function(input)
-        if IsPointerInput(input) then
+        if IsPointerDown(input) then
             PlayTween(button, TWEEN_PRESS, {BackgroundColor3 = downColor})
         end
     end)
 
     TrackConnection(registerConnection, button.InputEnded, function(input)
-        if IsPointerInput(input) then
+        if IsPointerDown(input) then
             PlayTween(button, TWEEN_PRESS, {BackgroundColor3 = hovering and overColor or defaultColor})
         end
     end)
@@ -268,7 +291,7 @@ function Luxware:CreateWindow(options)
         Size = UDim2.new(0, 26, 0, 24), Font = Enum.Font.GothamBold, Text = "X",
         TextColor3 = Theme.MutedText, TextSize = 16, AutoButtonColor = false, Active = true, ZIndex = 13
     })
-    AddCorner(CloseKey, 5)
+    AddCorner(CloseKey, 6)
     AddButtonFeedback(CloseKey, registerConnection, Theme.Surface, Theme.SurfaceLight, Theme.Border)
     ConnectActivated(CloseKey, registerConnection, function() Luxware:Destroy() end)
 
@@ -310,7 +333,6 @@ function Luxware:CreateWindow(options)
         Parent = MainFrame, BackgroundColor3 = Theme.Panel, Size = UDim2.new(1, 0, 0, 40),
         BorderSizePixel = 0, Active = true, ZIndex = 20
     })
-    MakeDraggable(TopBar, MainFrame, registerConnection)
 
     local Title = CreateUIElement("TextLabel", {
         Parent = TopBar, BackgroundTransparency = 1, Size = UDim2.new(1, -110, 1, 0), Position = UDim2.new(0, 14, 0, 0),
@@ -327,14 +349,14 @@ function Luxware:CreateWindow(options)
         Parent = TopBar, BackgroundColor3 = Theme.Surface, Size = UDim2.new(0, 30, 0, 26), Position = UDim2.new(1, -72, 0.5, -13),
         Font = Enum.Font.GothamBold, Text = "−", TextColor3 = Theme.Text, TextSize = 18, AutoButtonColor = false, Active = true, ZIndex = 30
     })
-    AddCorner(MinimizeButton, 5)
+    AddCorner(MinimizeButton, 6)
     AddButtonFeedback(MinimizeButton, registerConnection, Theme.Surface, Theme.SurfaceLight, Theme.Border)
 
     local CloseButton = CreateUIElement("TextButton", {
         Parent = TopBar, BackgroundColor3 = Theme.Surface, Size = UDim2.new(0, 30, 0, 26), Position = UDim2.new(1, -36, 0.5, -13),
         Font = Enum.Font.GothamBold, Text = "×", TextColor3 = Theme.Text, TextSize = 18, AutoButtonColor = false, Active = true, ZIndex = 30
     })
-    AddCorner(CloseButton, 5)
+    AddCorner(CloseButton, 6)
     AddButtonFeedback(CloseButton, registerConnection, Theme.Surface, Theme.SurfaceLight, Theme.Border)
 
     local LeftPanel = CreateUIElement("Frame", {
@@ -359,6 +381,7 @@ function Luxware:CreateWindow(options)
     AddStroke(OpenButton, Theme.Border)
     AddButtonFeedback(OpenButton, registerConnection, Theme.Surface, Theme.SurfaceLight, Theme.Border)
 
+    local openButtonPointerDown = false
     local openButtonDragging = false
     local openButtonWasDragged = false
     local openButtonDragInput = nil
@@ -367,9 +390,10 @@ function Luxware:CreateWindow(options)
     local openButtonInputType = nil
 
     TrackConnection(registerConnection, OpenButton.InputBegan, function(input)
-        if not IsPointerInput(input) then return end
+        if not IsPointerDown(input) then return end
 
-        openButtonDragging = true
+        openButtonPointerDown = true
+        openButtonDragging = false
         openButtonWasDragged = false
         openButtonDragInput = input
         openButtonInputType = input.UserInputType
@@ -378,14 +402,15 @@ function Luxware:CreateWindow(options)
     end)
 
     TrackConnection(registerConnection, UserInputService.InputChanged, function(input)
-        if not openButtonDragging then return end
-        if openButtonInputType == Enum.UserInputType.Touch and input ~= openButtonDragInput then return end
-        if openButtonInputType == Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+        if not openButtonPointerDown or not PointerMoveMatches(input, openButtonDragInput, openButtonInputType) then return end
 
-        local delta = input.Position - openButtonDragStart
-        if delta.X ~= 0 or delta.Y ~= 0 then
+        local distance, delta = PointerDeltaMagnitude(openButtonDragStart, input.Position)
+        if not openButtonDragging then
+            if distance < POINTER_DRAG_THRESHOLD then return end
+            openButtonDragging = true
             openButtonWasDragged = true
         end
+
         OpenButton.Position = UDim2.new(
             openButtonStartPosition.X.Scale,
             openButtonStartPosition.X.Offset + delta.X,
@@ -395,7 +420,8 @@ function Luxware:CreateWindow(options)
     end)
 
     TrackConnection(registerConnection, UserInputService.InputEnded, function(input)
-        if input == openButtonDragInput or input.UserInputType == openButtonInputType then
+        if IsPointerUp(input, openButtonDragInput, openButtonInputType) then
+            openButtonPointerDown = false
             openButtonDragging = false
             openButtonDragInput = nil
             openButtonInputType = nil
@@ -436,8 +462,8 @@ function Luxware:CreateWindow(options)
     end)
 
     -- Key System Functions
-    AddButtonFeedback(GetKeyBtn, registerConnection, Theme.Surface, Theme.SurfaceLight, Theme.Text)
-    AddButtonFeedback(CheckKeyBtn, registerConnection, Theme.Surface, Theme.SurfaceLight, Theme.Text)
+    AddButtonFeedback(GetKeyBtn, registerConnection, Theme.Surface, Theme.SurfaceLight, Theme.Border)
+    AddButtonFeedback(CheckKeyBtn, registerConnection, Theme.Surface, Theme.SurfaceLight, Theme.Border)
 
     ConnectActivated(GetKeyBtn, registerConnection, function()
         pcall(function() setclipboard(GetKeyLink) end)
@@ -556,7 +582,7 @@ function Luxware:CreateWindow(options)
                 Font = Enum.Font.Gotham, Text = opts.Name, TextColor3 = Theme.Text, TextSize = 13
             })
             AddCorner(Btn)
-            AddButtonFeedback(Btn, registerConnection, Theme.Surface, Theme.SurfaceLight, Theme.Text)
+            AddButtonFeedback(Btn, registerConnection, Theme.Surface, Theme.SurfaceLight, Theme.Border)
             ConnectActivated(Btn, registerConnection, function() RunCallback(opts.Callback) end)
         end
 
@@ -577,7 +603,7 @@ function Luxware:CreateWindow(options)
             })
             AddPillCorner(TglCircle)
 
-            AddButtonFeedback(TglFrame, registerConnection, Theme.Surface, Theme.SurfaceLight, Theme.Text)
+            AddButtonFeedback(TglFrame, registerConnection, Theme.Surface, Theme.SurfaceLight, Theme.Border)
             ConnectActivated(TglFrame, registerConnection, function()
                 state = not state
                 PlayTween(TglBox, TWEEN_DEFAULT, {BackgroundColor3 = state and Theme.ToggleOn or Theme.ToggleOff})
@@ -590,9 +616,16 @@ function Luxware:CreateWindow(options)
             opts = opts or {}
 
             local range = opts.Range or {0, 100}
-            local increment = opts.Increment or 1
-            local rangeSpan = math.max(range[2] - range[1], increment)
-            local val = math.clamp(opts.CurrentValue or range[1], range[1], range[2])
+            local minValue = tonumber(range[1]) or 0
+            local maxValue = tonumber(range[2]) or 100
+            if maxValue < minValue then
+                minValue, maxValue = maxValue, minValue
+            end
+            local increment = tonumber(opts.Increment) or 1
+            if increment <= 0 then increment = 1 end
+            local rangeSpan = math.max(maxValue - minValue, increment)
+            local val = math.clamp(opts.CurrentValue or minValue, minValue, maxValue)
+            local visualPos = math.clamp((val - minValue) / rangeSpan, 0, 1)
             local SldFrame = CreateControlFrame(Page, 50)
             CreateUIElement("TextLabel", {
                 Parent = SldFrame, BackgroundTransparency = 1, Size = UDim2.new(1, -10, 0, 25), Position = UDim2.new(0, 10, 0, 0),
@@ -603,48 +636,48 @@ function Luxware:CreateWindow(options)
                 Font = Enum.Font.Gotham, Text = tostring(val), TextColor3 = Theme.SoftText, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Right
             })
             local SldBG = CreateUIElement("TextButton", {
-                Parent = SldFrame, BackgroundColor3 = Theme.SurfaceLight, Size = UDim2.new(1, -20, 0, 6), Position = UDim2.new(0, 10, 0, 35), Text = "", AutoButtonColor = false, Active = true
+                Parent = SldFrame, BackgroundColor3 = Theme.SurfaceLight, Size = UDim2.new(1, -20, 0, 12), Position = UDim2.new(0, 10, 0, 32), Text = "", AutoButtonColor = false, Active = true
             })
             AddPillCorner(SldBG)
+            local SldTrack = CreateUIElement("Frame", {
+                Parent = SldBG, BackgroundColor3 = Theme.Border, Size = UDim2.new(1, 0, 0, 6), Position = UDim2.new(0, 0, 0.5, -3), BorderSizePixel = 0
+            })
+            AddPillCorner(SldTrack)
             local SldFill = CreateUIElement("Frame", {
-                Parent = SldBG, BackgroundColor3 = Theme.Text, Size = UDim2.new((val - range[1]) / rangeSpan, 0, 1, 0)
+                Parent = SldTrack, BackgroundColor3 = Theme.Text, Size = UDim2.new(visualPos, 0, 1, 0), BorderSizePixel = 0
             })
             AddPillCorner(SldFill)
 
             local dragging = false
             local sliderInput = nil
             local sliderInputType = nil
-            local function sliderInputMatches(input)
-                if not dragging then return false end
-                if sliderInputType == Enum.UserInputType.Touch then
-                    return input == sliderInput
-                end
-                return input.UserInputType == Enum.UserInputType.MouseMovement
+
+            local function roundValue(raw)
+                return math.clamp(math.floor((raw - minValue) / increment + 0.5) * increment + minValue, minValue, maxValue)
             end
 
             local function updateSlider(input)
                 if SldBG.AbsoluteSize.X <= 0 then return end
 
                 local pos = math.clamp((input.Position.X - SldBG.AbsolutePosition.X) / SldBG.AbsoluteSize.X, 0, 1)
-                val = math.floor(((pos * rangeSpan) + range[1]) / increment + 0.5) * increment
-                val = math.clamp(val, range[1], range[2])
+                local rawValue = minValue + (pos * (maxValue - minValue))
+                val = roundValue(rawValue)
                 SldFill.BackgroundColor3 = Theme.Text
-                PlayTween(SldFill, TWEEN_FAST, {Size = UDim2.new((val - range[1]) / rangeSpan, 0, 1, 0)})
+                SldFill.Size = UDim2.new(pos, 0, 1, 0)
                 ValTxt.Text = tostring(val)
                 RunCallback(opts.Callback, val)
             end
 
             TrackConnection(registerConnection, SldBG.InputBegan, function(input)
-                if IsPointerInput(input) then
-                    dragging = true
-                    sliderInput = input
-                    sliderInputType = input.UserInputType
-                    updateSlider(input)
-                end
+                if not IsPointerDown(input) then return end
+                dragging = true
+                sliderInput = input
+                sliderInputType = input.UserInputType
+                updateSlider(input)
             end)
 
             TrackConnection(registerConnection, UserInputService.InputEnded, function(input)
-                if input == sliderInput or input.UserInputType == sliderInputType then
+                if IsPointerUp(input, sliderInput, sliderInputType) then
                     dragging = false
                     sliderInput = nil
                     sliderInputType = nil
@@ -652,7 +685,7 @@ function Luxware:CreateWindow(options)
             end)
 
             TrackConnection(registerConnection, UserInputService.InputChanged, function(input)
-                if sliderInputMatches(input) then
+                if dragging and PointerMoveMatches(input, sliderInput, sliderInputType) then
                     updateSlider(input)
                 end
             end)
@@ -668,10 +701,10 @@ function Luxware:CreateWindow(options)
                 Parent = KbFrame, BackgroundColor3 = Theme.SurfaceLight, Size = UDim2.new(0, 80, 0, 25),
                 Position = UDim2.new(1, -90, 0.5, -12.5), Font = Enum.Font.GothamBold, Text = currentKey.Name, TextColor3 = Theme.Text, TextSize = 12
             })
-            AddCorner(KbBtn, 4)
+            AddCorner(KbBtn, 6)
 
             local binding = false
-            AddButtonFeedback(KbBtn, registerConnection, Theme.SurfaceLight, Theme.Border, Theme.Text)
+            AddButtonFeedback(KbBtn, registerConnection, Theme.SurfaceLight, Theme.Border, Theme.Surface)
             ConnectActivated(KbBtn, registerConnection, function()
                 binding = true
                 KbBtn.Text = "..."
@@ -692,33 +725,140 @@ function Luxware:CreateWindow(options)
             opts = opts or {}
 
             local clr = opts.Color or Theme.Text
-            local CpFrame = CreateControlFrame(Page)
-            CreateControlLabel(CpFrame, opts.Name, 100)
-            
-            -- Simplified RGB Input for pro hubs
-            local function makeBox(xPos, initialVal)
-                local box = CreateUIElement("TextBox", {
-                    Parent = CpFrame, BackgroundColor3 = Theme.SurfaceLight, Size = UDim2.new(0, 25, 0, 25),
-                    Position = UDim2.new(1, xPos, 0.5, -12.5), Font = Enum.Font.Gotham, Text = tostring(math.floor(initialVal*255)),
-                    TextColor3 = Theme.Text, TextSize = 12
+            local hue, saturation, value = Color3.toHSV(clr)
+            local CpFrame = CreateControlFrame(Page, 155)
+            CreateControlLabel(CpFrame, opts.Name, 165)
+
+            local Preview = CreateUIElement("Frame", {
+                Parent = CpFrame, BackgroundColor3 = clr, Size = UDim2.new(0, 34, 0, 34),
+                Position = UDim2.new(1, -44, 0, 10), BorderSizePixel = 0
+            })
+            AddCorner(Preview, 6)
+            AddStroke(Preview, Theme.Border)
+
+            local SVSquare = CreateUIElement("Frame", {
+                Parent = CpFrame, BackgroundColor3 = Color3.fromHSV(hue, 1, 1), Size = UDim2.new(0, 130, 0, 90),
+                Position = UDim2.new(0, 10, 0, 42), Active = true, BorderSizePixel = 0
+            })
+            AddCorner(SVSquare, 6)
+            AddStroke(SVSquare, Theme.Border)
+
+            local SaturationOverlay = CreateUIElement("Frame", {
+                Parent = SVSquare, BackgroundColor3 = Theme.Text, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 0, BorderSizePixel = 0, Active = false
+            })
+            AddCorner(SaturationOverlay, 6)
+            CreateUIElement("UIGradient", {
+                Parent = SaturationOverlay,
+                Transparency = NumberSequence.new({
+                    NumberSequenceKeypoint.new(0, 0),
+                    NumberSequenceKeypoint.new(1, 1)
                 })
-                AddCorner(box, 4)
-                return box
+            })
+
+            local ValueOverlay = CreateUIElement("Frame", {
+                Parent = SVSquare, BackgroundColor3 = Theme.Background, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 0, BorderSizePixel = 0, Active = false
+            })
+            AddCorner(ValueOverlay, 6)
+            CreateUIElement("UIGradient", {
+                Parent = ValueOverlay,
+                Rotation = 90,
+                Transparency = NumberSequence.new({
+                    NumberSequenceKeypoint.new(0, 1),
+                    NumberSequenceKeypoint.new(1, 0)
+                })
+            })
+
+            local SVMarker = CreateUIElement("Frame", {
+                Parent = SVSquare, BackgroundColor3 = Theme.Text, Size = UDim2.new(0, 10, 0, 10),
+                Position = UDim2.new(saturation, -5, 1 - value, -5), BorderSizePixel = 0, Active = false, ZIndex = (SVSquare.ZIndex or 1) + 3
+            })
+            AddPillCorner(SVMarker)
+            AddStroke(SVMarker, Theme.Background)
+
+            local HueBar = CreateUIElement("Frame", {
+                Parent = CpFrame, BackgroundColor3 = Theme.SurfaceLight, Size = UDim2.new(1, -60, 0, 12),
+                Position = UDim2.new(0, 10, 0, 138), Active = true, BorderSizePixel = 0
+            })
+            AddPillCorner(HueBar)
+            CreateUIElement("UIGradient", {
+                Parent = HueBar,
+                Color = ColorSequence.new({
+                    ColorSequenceKeypoint.new(0, Color3.fromHSV(0, 1, 1)),
+                    ColorSequenceKeypoint.new(0.17, Color3.fromHSV(0.17, 1, 1)),
+                    ColorSequenceKeypoint.new(0.33, Color3.fromHSV(0.33, 1, 1)),
+                    ColorSequenceKeypoint.new(0.5, Color3.fromHSV(0.5, 1, 1)),
+                    ColorSequenceKeypoint.new(0.67, Color3.fromHSV(0.67, 1, 1)),
+                    ColorSequenceKeypoint.new(0.83, Color3.fromHSV(0.83, 1, 1)),
+                    ColorSequenceKeypoint.new(1, Color3.fromHSV(1, 1, 1))
+                })
+            })
+
+            local HueMarker = CreateUIElement("Frame", {
+                Parent = HueBar, BackgroundColor3 = Theme.Text, Size = UDim2.new(0, 8, 0, 18),
+                Position = UDim2.new(hue, -4, 0.5, -9), BorderSizePixel = 0, Active = false, ZIndex = (HueBar.ZIndex or 1) + 3
+            })
+            AddCorner(HueMarker, 6)
+            AddStroke(HueMarker, Theme.Background)
+
+            local ColorValue = CreateUIElement("TextLabel", {
+                Parent = CpFrame, BackgroundTransparency = 1, Size = UDim2.new(1, -160, 0, 22), Position = UDim2.new(0, 150, 0, 52),
+                Font = Enum.Font.Gotham, Text = "HSV", TextColor3 = Theme.SoftText, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left
+            })
+
+            local function updateColor(shouldCallback)
+                clr = Color3.fromHSV(hue, saturation, value)
+                SVSquare.BackgroundColor3 = Color3.fromHSV(hue, 1, 1)
+                Preview.BackgroundColor3 = clr
+                SVMarker.Position = UDim2.new(saturation, -5, 1 - value, -5)
+                HueMarker.Position = UDim2.new(hue, -4, 0.5, -9)
+                ColorValue.Text = string.format("H %d  S %d%%  V %d%%", math.floor(hue * 360 + 0.5), math.floor(saturation * 100 + 0.5), math.floor(value * 100 + 0.5))
+                if shouldCallback then
+                    RunCallback(opts.Callback, clr)
+                end
             end
 
-            local RBox = makeBox(-100, clr.R)
-            local GBox = makeBox(-70, clr.G)
-            local BBox = makeBox(-40, clr.B)
+            local function connectPointerDrag(target, updateFromInput)
+                local dragging = false
+                local pointerInput = nil
+                local pointerType = nil
 
-            local function updateColor()
-                local r, g, b = tonumber(RBox.Text) or 255, tonumber(GBox.Text) or 255, tonumber(BBox.Text) or 255
-                clr = Color3.fromRGB(math.clamp(r, 0, 255), math.clamp(g, 0, 255), math.clamp(b, 0, 255))
-                RunCallback(opts.Callback, clr)
+                TrackConnection(registerConnection, target.InputBegan, function(input)
+                    if not IsPointerDown(input) then return end
+                    dragging = true
+                    pointerInput = input
+                    pointerType = input.UserInputType
+                    updateFromInput(input)
+                end)
+
+                TrackConnection(registerConnection, UserInputService.InputChanged, function(input)
+                    if dragging and PointerMoveMatches(input, pointerInput, pointerType) then
+                        updateFromInput(input)
+                    end
+                end)
+
+                TrackConnection(registerConnection, UserInputService.InputEnded, function(input)
+                    if IsPointerUp(input, pointerInput, pointerType) then
+                        dragging = false
+                        pointerInput = nil
+                        pointerType = nil
+                    end
+                end)
             end
 
-            TrackConnection(registerConnection, RBox.FocusLost, updateColor)
-            TrackConnection(registerConnection, GBox.FocusLost, updateColor)
-            TrackConnection(registerConnection, BBox.FocusLost, updateColor)
+            connectPointerDrag(SVSquare, function(input)
+                if SVSquare.AbsoluteSize.X <= 0 or SVSquare.AbsoluteSize.Y <= 0 then return end
+                saturation = math.clamp((input.Position.X - SVSquare.AbsolutePosition.X) / SVSquare.AbsoluteSize.X, 0, 1)
+                value = 1 - math.clamp((input.Position.Y - SVSquare.AbsolutePosition.Y) / SVSquare.AbsoluteSize.Y, 0, 1)
+                updateColor(true)
+            end)
+
+            connectPointerDrag(HueBar, function(input)
+                if HueBar.AbsoluteSize.X <= 0 then return end
+                hue = math.clamp((input.Position.X - HueBar.AbsolutePosition.X) / HueBar.AbsoluteSize.X, 0, 1)
+                updateColor(true)
+            end)
+
+            updateColor(false)
         end
 
         return TabElements
